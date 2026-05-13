@@ -1,197 +1,182 @@
 <!DOCTYPE html>
 <html lang="id">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Sleep Detection</title>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>AI Sleep Detection</title>
 
-    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
 
-    <style>
-        body {
-            background: #111;
-            color: white;
-            text-align: center;
-            font-family: Arial;
-        }
+<style>
+body {
+    background:#111;
+    color:white;
+    text-align:center;
+    font-family:Arial;
+}
 
-        .container {
-            position: relative;
-            width: 640px;
-            margin: auto;
-        }
+.container {
+    position:relative;
+    width:640px;
+    margin:auto;
+}
 
-        video, canvas {
-            width: 640px;
-            height: 480px;
-            border-radius: 10px;
-        }
+video, canvas {
+    width:640px;
+    height:480px;
+    border-radius:10px;
+}
 
-        #overlay {
-            position: absolute;
-            left: 0;
-            top: 0;
-        }
+#overlay {
+    position:absolute;
+    left:0;
+    top:0;
+}
 
-        button {
-            margin-top: 15px;
-            padding: 10px 20px;
-            font-size: 18px;
-            cursor: pointer;
-        }
+button {
+    margin-top:15px;
+    padding:10px 20px;
+    font-size:18px;
+    cursor:pointer;
+}
 
-        #status {
-            margin-top: 10px;
-            font-size: 20px;
-            color: #00ff88;
-        }
-    </style>
+#status {
+    margin-top:10px;
+    font-size:18px;
+    color:#00ff88;
+}
+</style>
 </head>
+
 <body>
 
-    <h1>AI Sleep Detection</h1>
+<h1>AI Sleep Detection</h1>
 
-    <div class="container">
-        <video id="webcam" autoplay playsinline></video>
-        <canvas id="overlay" width="640" height="480"></canvas>
-    </div>
+<div class="container">
+    <video id="webcam" autoplay playsinline></video>
+    <canvas id="overlay" width="640" height="480"></canvas>
+</div>
 
-    <canvas id="processor" width="640" height="640" style="display:none;"></canvas>
+<canvas id="processor" width="640" height="640" style="display:none;"></canvas>
 
-    <button id="btn-init">Mulai AI</button>
-
-    <div id="status">Sistem belum aktif</div>
+<button id="btn-init">Mulai AI</button>
+<div id="status">Sistem belum aktif</div>
 
 <script>
-// ======================================================================
-// CONFIG
-// ======================================================================
 const CONFIG = {
-    modelPath: './best.onnx',
-
-    // class sesuai Roboflow
+    modelPath: "./best.onnx",
     labels: ["Bangun", "Tidur"],
-
-    threshold: 0.60,
-    iouThreshold: 0.4
+    threshold: 0.6
 };
 
-// ======================================================================
-// ENGINE AI
-// ======================================================================
+const video = document.getElementById("webcam");
+const overlay = document.getElementById("overlay");
+const ctxOverlay = overlay.getContext("2d");
 
-const video = document.getElementById('webcam');
-const overlay = document.getElementById('overlay');
-const ctxOverlay = overlay.getContext('2d');
+const processor = document.getElementById("processor");
+const ctxProcessor = processor.getContext("2d");
 
-const processor = document.getElementById('processor');
-const ctxProcessor = processor.getContext('2d', { willReadFrequently: true });
+const status = document.getElementById("status");
+const button = document.getElementById("btn-init");
 
-const status = document.getElementById('status');
-const initBtn = document.getElementById('btn-init');
+const SIZE = 640;
 
 let session;
-const TARGET_SIZE = 640;
 
-initBtn.addEventListener('click', async () => {
-    initBtn.disabled = true;
-    initBtn.innerText = "MEMUAT MODEL...";
-
+// ================= LOAD MODEL =================
+button.onclick = async () => {
     try {
-        ort.env.wasm.wasmPaths =
-            'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/';
+        button.innerText = "LOADING...";
+        button.disabled = true;
 
-        session = await ort.InferenceSession.create(CONFIG.modelPath, {
-            executionProviders: ['webgl', 'wasm']
-        });
+        ort.env.wasm.wasmPaths =
+            "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/";
+
+        console.log("LOAD MODEL...");
+
+        session = await ort.InferenceSession.create(
+            CONFIG.modelPath,
+            { executionProviders: ["webgl", "wasm"] }
+        );
+
+        console.log("MODEL OK");
 
         startCamera();
 
     } catch (e) {
-        status.innerText = "MODEL GAGAL DIMUAT";
         console.error(e);
+        status.innerText = "MODEL ERROR (CEK CONSOLE)";
     }
-});
+};
 
+// ================= CAMERA =================
 async function startCamera() {
-    const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 640, height: 480 },
-        audio: false
-    });
+    try {
+        console.log("CAMERA START");
 
-    video.srcObject = stream;
-
-    video.onloadedmetadata = () => {
-        video.play();
-
-        status.innerText = "AI AKTIF";
-
-        initBtn.style.display = "none";
-
-        requestAnimationFrame(processFrame);
-    };
-}
-
-async function processFrame() {
-    if (!session) return;
-
-    ctxProcessor.drawImage(video, 0, 0, TARGET_SIZE, TARGET_SIZE);
-
-    const imageData =
-        ctxProcessor.getImageData(0, 0, TARGET_SIZE, TARGET_SIZE).data;
-
-    const float32Data =
-        new Float32Array(3 * TARGET_SIZE * TARGET_SIZE);
-
-    for (let i = 0; i < TARGET_SIZE * TARGET_SIZE; i++) {
-
-        float32Data[i] =
-            imageData[i * 4] / 255.0;
-
-        float32Data[i + TARGET_SIZE * TARGET_SIZE] =
-            imageData[i * 4 + 1] / 255.0;
-
-        float32Data[i + 2 * TARGET_SIZE * TARGET_SIZE] =
-            imageData[i * 4 + 2] / 255.0;
-    }
-
-    const inputTensor = new ort.Tensor(
-        'float32',
-        float32Data,
-        [1, 3, TARGET_SIZE, TARGET_SIZE]
-    );
-
-    const results =
-        await session.run({
-            [session.inputNames[0]]: inputTensor
+        const stream = await navigator.mediaDevices.getUserMedia({
+            video: true
         });
 
-    const output =
-        results[session.outputNames[0]].data;
+        video.srcObject = stream;
 
-    const numClasses = CONFIG.labels.length;
+        video.onloadedmetadata = () => {
+            video.play();
 
+            status.innerText = "AI AKTIF";
+            button.style.display = "none";
+
+            loop();
+        };
+
+    } catch (e) {
+        console.error(e);
+        status.innerText = "KAMERA ERROR / IZIN DITOLAK";
+    }
+}
+
+// ================= LOOP =================
+async function loop() {
+    if (!session) return;
+
+    ctxProcessor.drawImage(video, 0, 0, SIZE, SIZE);
+
+    const data = ctxProcessor.getImageData(0, 0, SIZE, SIZE).data;
+
+    const input = new Float32Array(3 * SIZE * SIZE);
+
+    for (let i = 0; i < SIZE * SIZE; i++) {
+        input[i] = data[i * 4] / 255;
+        input[i + SIZE * SIZE] = data[i * 4 + 1] / 255;
+        input[i + 2 * SIZE * SIZE] = data[i * 4 + 2] / 255;
+    }
+
+    const tensor = new ort.Tensor("float32", input, [1, 3, SIZE, SIZE]);
+
+    const result = await session.run({
+        [session.inputNames[0]]: tensor
+    });
+
+    const output = result[session.outputNames[0]].data;
+
+    const boxes = [];
     const elements = 8400;
-
-    let rawBoxes = [];
+    const classes = CONFIG.labels.length;
 
     for (let i = 0; i < elements; i++) {
 
-        let maxScore = 0;
-        let classId = -1;
+        let max = 0;
+        let id = -1;
 
-        for (let c = 0; c < numClasses; c++) {
-
-            const score =
-                output[i + (4 + c) * elements];
-
-            if (score > maxScore) {
-                maxScore = score;
-                classId = c;
+        for (let c = 0; c < classes; c++) {
+            const score = output[i + (4 + c) * elements];
+            if (score > max) {
+                max = score;
+                id = c;
             }
         }
 
-        if (maxScore > CONFIG.threshold) {
+        if (max > CONFIG.threshold) {
 
             let x = output[i];
             let y = output[i + elements];
@@ -199,75 +184,71 @@ async function processFrame() {
             let h = output[i + 3 * elements];
 
             if (w <= 1.5) {
-                x *= TARGET_SIZE;
-                y *= TARGET_SIZE;
-                w *= TARGET_SIZE;
-                h *= TARGET_SIZE;
+                x *= SIZE;
+                y *= SIZE;
+                w *= SIZE;
+                h *= SIZE;
             }
 
-            rawBoxes.push({
+            boxes.push({
                 x: x - w / 2,
                 y: y - h / 2,
-                w: w,
-                h: h,
-                score: maxScore,
-                classId: classId
+                w,
+                h,
+                id,
+                score: max
             });
         }
     }
 
-    drawBoxes(rawBoxes);
+    draw(boxes);
 
-    requestAnimationFrame(processFrame);
+    requestAnimationFrame(loop);
 }
 
-function drawBoxes(boxes) {
+// ================= DRAW =================
+function draw(boxes) {
+    ctxOverlay.clearRect(0,0,640,480);
 
-    ctxOverlay.clearRect(
-        0,
-        0,
-        overlay.width,
-        overlay.height
-    );
+    const sx = overlay.width / SIZE;
+    const sy = overlay.height / SIZE;
 
-    boxes.forEach(box => {
+    let sleep = false;
 
-        const scaleX = overlay.width / TARGET_SIZE;
-        const scaleY = overlay.height / TARGET_SIZE;
+    boxes.forEach(b => {
 
-        const label =
-            CONFIG.labels[box.classId];
+        const label = CONFIG.labels[b.id];
 
-        // WARNA BERBEDA
+        let color = "#00ff88";
+
         if (label === "Tidur") {
-            ctxOverlay.strokeStyle = "red";
-            ctxOverlay.fillStyle = "red";
-
-            status.innerText = "STATUS: TIDUR 😴";
-        } else {
-            ctxOverlay.strokeStyle = "#00ff88";
-            ctxOverlay.fillStyle = "#00ff88";
-
-            status.innerText = "STATUS: BANGUN 😀";
+            color = "red";
+            sleep = true;
         }
 
+        ctxOverlay.strokeStyle = color;
         ctxOverlay.lineWidth = 3;
 
         ctxOverlay.strokeRect(
-            box.x * scaleX,
-            box.y * scaleY,
-            box.w * scaleX,
-            box.h * scaleY
+            b.x * sx,
+            b.y * sy,
+            b.w * sx,
+            b.h * sy
         );
 
-        ctxOverlay.font = "bold 18px Arial";
+        ctxOverlay.fillStyle = color;
+        ctxOverlay.font = "16px Arial";
 
         ctxOverlay.fillText(
-            `${label} ${(box.score * 100).toFixed(0)}%`,
-            box.x * scaleX,
-            box.y * scaleY - 10
+            `${label} ${(b.score*100).toFixed(0)}%`,
+            b.x * sx,
+            b.y * sy - 5
         );
     });
+
+    status.innerText = sleep
+        ? "😴 TIDUR TERDETEKSI"
+        : "😃 TERJAGA";
 }
 </script>
 
