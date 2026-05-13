@@ -1,7 +1,7 @@
 const CONFIG = {
     modelPath: "./best.onnx",
-    labels: ["awake", "sleeping"],
-    threshold: 0.45,
+    labels: ["Bangun", "Tidur"],
+    threshold: 0.60,
     iouThreshold: 0.4
 };
 
