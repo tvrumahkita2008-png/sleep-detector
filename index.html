@@ -1,256 +1,53 @@
+<!-- index.html -->
 <!DOCTYPE html>
 <html lang="id">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>AI Sleep Detection</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sleep Detection</title>
 
-<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+  <style>
+    body{
+      margin:0;
+      padding:0;
+      background:#0f172a;
+      display:flex;
+      justify-content:center;
+      align-items:center;
+      height:100vh;
+      flex-direction:column;
+      color:white;
+      font-family:Arial;
+    }
 
-<style>
-body {
-    background:#111;
-    color:white;
-    text-align:center;
-    font-family:Arial;
-}
+    h1{
+      margin-bottom:20px;
+    }
 
-.container {
-    position:relative;
-    width:640px;
-    margin:auto;
-}
+    video{
+      width:700px;
+      max-width:90%;
+      border-radius:15px;
+      border:4px solid cyan;
+    }
 
-video, canvas {
-    width:640px;
-    height:480px;
-    border-radius:10px;
-}
-
-#overlay {
-    position:absolute;
-    left:0;
-    top:0;
-}
-
-button {
-    margin-top:15px;
-    padding:10px 20px;
-    font-size:18px;
-    cursor:pointer;
-}
-
-#status {
-    margin-top:10px;
-    font-size:18px;
-    color:#00ff88;
-}
-</style>
+    #status{
+      margin-top:20px;
+      font-size:25px;
+      font-weight:bold;
+      color:yellow;
+    }
+  </style>
 </head>
-
 <body>
 
-<h1>AI Sleep Detection</h1>
+  <h1>Sleep Detection Camera</h1>
 
-<div class="container">
-    <video id="webcam" autoplay playsinline></video>
-    <canvas id="overlay" width="640" height="480"></canvas>
-</div>
+  <video id="video" autoplay playsinline></video>
 
-<canvas id="processor" width="640" height="640" style="display:none;"></canvas>
+  <div id="status">Menghubungkan kamera...</div>
 
-<button id="btn-init">Mulai AI</button>
-<div id="status">Sistem belum aktif</div>
-
-<script>
-const CONFIG = {
-    modelPath: "./best.onnx",
-    labels: ["Bangun", "Tidur"],
-    threshold: 0.6
-};
-
-const video = document.getElementById("webcam");
-const overlay = document.getElementById("overlay");
-const ctxOverlay = overlay.getContext("2d");
-
-const processor = document.getElementById("processor");
-const ctxProcessor = processor.getContext("2d");
-
-const status = document.getElementById("status");
-const button = document.getElementById("btn-init");
-
-const SIZE = 640;
-
-let session;
-
-// ================= LOAD MODEL =================
-button.onclick = async () => {
-    try {
-        button.innerText = "LOADING...";
-        button.disabled = true;
-
-        ort.env.wasm.wasmPaths =
-            "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/";
-
-        console.log("LOAD MODEL...");
-
-        session = await ort.InferenceSession.create(
-            CONFIG.modelPath,
-            { executionProviders: ["webgl", "wasm"] }
-        );
-
-        console.log("MODEL OK");
-
-        startCamera();
-
-    } catch (e) {
-        console.error(e);
-        status.innerText = "MODEL ERROR (CEK CONSOLE)";
-    }
-};
-
-// ================= CAMERA =================
-async function startCamera() {
-    try {
-        console.log("CAMERA START");
-
-        const stream = await navigator.mediaDevices.getUserMedia({
-            video: true
-        });
-
-        video.srcObject = stream;
-
-        video.onloadedmetadata = () => {
-            video.play();
-
-            status.innerText = "AI AKTIF";
-            button.style.display = "none";
-
-            loop();
-        };
-
-    } catch (e) {
-        console.error(e);
-        status.innerText = "KAMERA ERROR / IZIN DITOLAK";
-    }
-}
-
-// ================= LOOP =================
-async function loop() {
-    if (!session) return;
-
-    ctxProcessor.drawImage(video, 0, 0, SIZE, SIZE);
-
-    const data = ctxProcessor.getImageData(0, 0, SIZE, SIZE).data;
-
-    const input = new Float32Array(3 * SIZE * SIZE);
-
-    for (let i = 0; i < SIZE * SIZE; i++) {
-        input[i] = data[i * 4] / 255;
-        input[i + SIZE * SIZE] = data[i * 4 + 1] / 255;
-        input[i + 2 * SIZE * SIZE] = data[i * 4 + 2] / 255;
-    }
-
-    const tensor = new ort.Tensor("float32", input, [1, 3, SIZE, SIZE]);
-
-    const result = await session.run({
-        [session.inputNames[0]]: tensor
-    });
-
-    const output = result[session.outputNames[0]].data;
-
-    const boxes = [];
-    const elements = 8400;
-    const classes = CONFIG.labels.length;
-
-    for (let i = 0; i < elements; i++) {
-
-        let max = 0;
-        let id = -1;
-
-        for (let c = 0; c < classes; c++) {
-            const score = output[i + (4 + c) * elements];
-            if (score > max) {
-                max = score;
-                id = c;
-            }
-        }
-
-        if (max > CONFIG.threshold) {
-
-            let x = output[i];
-            let y = output[i + elements];
-            let w = output[i + 2 * elements];
-            let h = output[i + 3 * elements];
-
-            if (w <= 1.5) {
-                x *= SIZE;
-                y *= SIZE;
-                w *= SIZE;
-                h *= SIZE;
-            }
-
-            boxes.push({
-                x: x - w / 2,
-                y: y - h / 2,
-                w,
-                h,
-                id,
-                score: max
-            });
-        }
-    }
-
-    draw(boxes);
-
-    requestAnimationFrame(loop);
-}
-
-// ================= DRAW =================
-function draw(boxes) {
-    ctxOverlay.clearRect(0,0,640,480);
-
-    const sx = overlay.width / SIZE;
-    const sy = overlay.height / SIZE;
-
-    let sleep = false;
-
-    boxes.forEach(b => {
-
-        const label = CONFIG.labels[b.id];
-
-        let color = "#00ff88";
-
-        if (label === "Tidur") {
-            color = "red";
-            sleep = true;
-        }
-
-        ctxOverlay.strokeStyle = color;
-        ctxOverlay.lineWidth = 3;
-
-        ctxOverlay.strokeRect(
-            b.x * sx,
-            b.y * sy,
-            b.w * sx,
-            b.h * sy
-        );
-
-        ctxOverlay.fillStyle = color;
-        ctxOverlay.font = "16px Arial";
-
-        ctxOverlay.fillText(
-            `${label} ${(b.score*100).toFixed(0)}%`,
-            b.x * sx,
-            b.y * sy - 5
-        );
-    });
-
-    status.innerText = sleep
-        ? "😴 TIDUR TERDETEKSI"
-        : "😃 TERJAGA";
-}
-</script>
+  <script src="script.js"></script>
 
 </body>
 </html>
